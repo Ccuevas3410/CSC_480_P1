@@ -8,7 +8,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <openssl/sha.h>
-
+#include <sys/mman.h>
 #include "ske.h"
 #include "rsa.h"
 #include "prf.h"
@@ -61,8 +61,7 @@ int kem_encrypt(const char* fnOut, const char* fnIn, RSA_KEY* K)
 /*Create a random entropy of the same size as the rsa keys length, and
 * use it to generate the SKE key*/
 	size_t symmetricKeyLen = rsa_numBytesN(K);
-	unsigend char* x = malloc(symmetricKeyLen);
-	randBytes(x,symmetricKeyLen -1 );
+	unsigned char* x = malloc(symmetricKeyLen);
 	SKE_KEY SK;
 	ske_keyGen(&SK,x,symmetricKeyLen);
 	unsigned char* encapkey = malloc(symmetricKeyLen + HASHLEN);
@@ -75,15 +74,19 @@ int kem_encrypt(const char* fnOut, const char* fnIn, RSA_KEY* K)
 	memcpy(encapkey + symmetricKeyLen,tempHash,HASHLEN);
 
 //Writing the encapsulated key into the output file
-	FILE *outFile = fopen(fnOut, "w");
-	fwrite(encapkey, 1, symmetricKeyLen + HASHLEN, outFile);
-	if (fclose(outFile) != 0) {
-		fprintf(stderr, "Unable to close output file stream\n");
+	int fdOut;
+	fdOut = open(fnOut, O_RDWR|O_CREAT, S_IRWXU);
+	int wr = write(fdOut, encapkey, symmetricKeyLen + HASHLEN);
+	if (wr< 0) {
+		fprintf(stderr, "Error writing to file");
 		return 1;
 	}
+	close(fdOut);
 
 //Encrypting the file
-	ske_encrypt_file(fnOut, fnIn, &SK, NULL,symmetricKeyLen + HASHLEN );
+	unsigned char* IV = malloc(16);
+	randBytes(IV,16);
+	ske_encrypt_file(fnOut, fnIn, &SK, IV,symmetricKeyLen + HASHLEN );
 	
 	return 0;
 }
@@ -97,46 +100,43 @@ int kem_decrypt(const char* fnOut, const char* fnIn, RSA_KEY* K)
 	/* step 3: derive key from ephemKey and decrypt data. */
 
 //The first n bytes are the RSA, the remaining bytes are the ciphertext
-	FILE *inputFile = fopen(fnIn, "r");
-	if (inputFile == NULL) {
-		fprintf(stderr, "An error occurred opening the input file\n");
-		return 1;
+	int fdIn;
+	unsigned char* mappedFile; //for mmap
+	size_t fileSize;
+	struct stat st;	
+	
+	fdIn = open(fnIn, &st);
+	fileSize = st.st_size;
+	//Copy the file and put it in a buffer
+	mappedFile = mmap(NULL, fileSize, PROT_READ, MAP_PRIVATE, fdIn, 0);
+	if (mappedFile == MAP_FAILED){
+		fprintf(stderr, "Error");
 	}
+	close(fdIn);
 
 	size_t keylen = rsa_numBytesN(K);
-	unsigned int encapKeyLen = keylen + HASHLEN;
-	unsigned char *encapKey = calloc(encapKeyLen, 1);
-	assert(encapKey != NULL);
-	int amountRead = fread(encapKey, 1, encapKeyLen, inputFile);
-	fclose(inputFile);
-	if (amountRead < 0) {
-		fprintf(stderr, "An error occurred reading from the file\n");
-		return 1;
-	}
-
-//Split the encapsulated key into the RSA and HASH parts and Decrypt
-	unsigned char *rsa = calloc(keylen, 1);
-	unsigned char *sha = calloc(HASHLEN, 1);
-	memcpy(rsa, encapKey, keylen);
-	memcpy(sha, &encapKey[keylen], HASHLEN);
-	unsigned char *symmetricKey = calloc(keylen, 1);
-	assert(symmetricKey != NULL);
-	rsa_decrypt(symmetricKey, rsa, keylen, K);
-
+	unsigned char* EncFile = malloc(keylen); 
+	memcpy(EncFile, mappedFile, keylen); 
+	unsigned char* DecFile = malloc(keylen);
+	rsa_decrypt(DecFile, EncFile, keylen, K); 	
+	
 //HASH Check
 /*Hash the entropy and compares it to h(x) */ 
 	unsigned char* tempHash=malloc(HASHLEN);
-	SHA256(symmetricKey,keylen,tempHash);
+	SHA256(DecFile,keylen,tempHash);
 	unsigned char* hashCheck = malloc(HASHLEN);
-	if (memcmp(sha, tempHASH, HASHLEN) != 0) {
-   		printf("Decapsualtion failed: corrupted message\n");
-    		exit(1);
+	memcmp(hashCheck, mappedFile+keylen, HASHLEN);
+	for(size_t i=0; i<HASHLEN; ++i){
+		if(hashCheck[i] != tempHash[i]){
+   			printf("Decapsualtion failed: Hash incorrect");
+    			return -1;
+		}
   	}
 //Generate ske key and decrypt the file
 	SKE_KEY SK;
-	ske_keyGen(&SK, symmetricKey, keylen);
+	ske_keyGen(&SK, DecFile, keylen);
 
-	ske_decrypt_file(fnOut, fnIn, &SK, encapKeyLen);
+	ske_decrypt_file(fnOut, fnIn, &SK, keylen+HASHLEN);
 
 	return 0;
 }
@@ -210,33 +210,43 @@ int main(int argc, char *argv[]) {
 	 * rsa_shredKey function). */
 
 	RSA_KEY K;
+	FILE* rsa_publicKey;
+	FILE* rsa_privateKey;
 	switch (mode) {
 		case ENC:
-			int keyFd = open(fnKey, O_RDWR | O_CREAT, 0666);
-			FILE *kFile = fdopen(keyFd, "r+");
-			rsa_readPublic(kFile, &K);
+			rsa_publicKey = fopen(fnKey, "r");
+			if( rsa_publicKey == NULL){
+				printf("ERROR with key");
+				return -1;
+			}
+			rsa_readPublic(rsa_publicKey, &K);
 			kem_encrypt(fnOut, fnIn, &K);
+			fclose(rsa_publicKey);
+			rsa_shredKey(&K);
+			break;
 		case DEC:
-			int keyFd = open(fnKey, O_RDWR | O_CREAT, 0666);
-			FILE *kFile = fdopen(keyFd, "r+");
-			rsa_readPrivate(kFile, &K);
+			rsa_privateKey = fdopen(fnKey, "r");
+			rsa_readPrivate(rsa_privateKey, &K);
 			kem_decrypt(fnOut, fnIn, &K);
+			fclose(rsa_privateKey);
+			rsa_shredKey(&K);
+			break;
 		case GEN:
 			rsa_keyGen(nBits, &K);
-//Generate new key and write private key to $FILE, public key to $FILE.pub
-			char *publicKeyFn = calloc(FNLEN + 4, 1);
-			assert(publicKeyFn != NULL);
-			strcat(publicKeyFn, fnOut);
-			strcat(publicKeyFn, ".pub");
+//Generate new key and write keys to file
+			rsa_privateKey = fopen(fnOut, "w+");
+			rsa_writePrivate(rsa_privateKey, &K);
+//Append '.pub to filename for public Key
+			strcat(fnOut, ".pub"); 			
+			rsa_publicKey = fopen(fnOut, "w+");			
+			rsa_writePublic(rsa_publicKey, &K);
 
-			FILE *publicKeyFile = fopen(publicKeyFn, "w");
-			FILE *privKeyFile = fopen(fnOut, "w");
-			rsa_writePublic(publicKeyFile, &K);
-			rsa_writePrivate(privKeyFile, &K);
 	
-			fclose(publicKeyFile);
-			fclose(privKeyFile);
+			fclose(rsa_publicKey);
+			fclose(rsa_privateKey);
+			rsa_shredKey(&K);
+			break;
 	}
- 	rsa_shredKey(&K);
+ 	
 	return 0;
 }
