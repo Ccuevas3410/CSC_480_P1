@@ -51,7 +51,7 @@ int ske_keyGen(SKE_KEY* K, unsigned char* entropy, size_t entLen)
 		randBytes(keyMaterial, 64);
 	}
 	memcpy(K->hmacKey, keyMaterial, 32);
-	memcpy(K->aesKey, keyMaterial+32, 32);
+	memcpy(K->aesKey, keyMaterial + 32, 32);
 	memset(keyMaterial, 0, 64);
 	
 	return 0;
@@ -82,7 +82,7 @@ size_t ske_encrypt(unsigned char* outBuf, unsigned char* inBuf, size_t len,
  	//ciphertext lenght
  	int nWritten;
  	//actual encryption. ciphertext stored in outBuf+16.
- 	if(1!= EVP_EncryptUpdate(ctx, outBuf+16, &nWritten, inBuf, len)){
+ 	if(1 != EVP_EncryptUpdate(ctx, outBuf + 16, &nWritten, inBuf, len)){
  		ERR_print_errors_fp(stderr);
  	}
  	
@@ -112,7 +112,7 @@ size_t ske_encrypt_file(const char* fnout, const char* fnin,
 	int fdin = open(fnin, O_RDONLY);
 	int fdout = open(fnout, O_CREAT | O_RDWR, S_IRWXU);
 	//check if files opened properly! 
-	if (( fdin == -1) || (fdout == -1)) {
+	if ((fdin == -1) || (fdout == -1)) {
 		printf("Failed to open files!!!!\n");
 		return -1;
 	}
@@ -136,9 +136,9 @@ size_t ske_encrypt_file(const char* fnout, const char* fnin,
 	size_t ciphertextLength = ske_getOutputLen(fdinLength);
 	unsigned char* ciphertext = malloc(ciphertextLength);
 
-	ssize_t encryptLength = ske_encrypt(ciphertext, (unsigned char*)mapping, fdinLength, K, IV);
+	ssize_t encryptLength = ske_encrypt(ciphertext, (unsigned char*) mapping, fdinLength, K, IV);
 
-	//chekcs if encryption works and validates that encrypt returns proper ciphertext length!
+	//checks if encryption works and validates that encrypt returns proper ciphertext length!
 	if ((encryptLength == -1) || (encryptLength != ciphertextLength)){
 		printf("Failed to encrypt!!\n");
 		return -1;
@@ -149,7 +149,6 @@ size_t ske_encrypt_file(const char* fnout, const char* fnin,
 
 	if (writtenBits == -1){
 		printf("Writting Failed!\n");
-		return -1;
 	}
 
 	if (!munmap(mapping, statusBuff.st_size)){
@@ -164,7 +163,7 @@ size_t ske_encrypt_file(const char* fnout, const char* fnin,
 		return -1;
 	}
 
-	return 0;
+	return writtenBits;
 }
 size_t ske_decrypt(unsigned char* outBuf, unsigned char* inBuf, size_t len,
 		SKE_KEY* K)
@@ -181,8 +180,8 @@ size_t ske_decrypt(unsigned char* outBuf, unsigned char* inBuf, size_t len,
 
 	//Check that ciphertext is valid. 
 	//Check that each elelment of hBuf is same as hBuf that was a part of our outBuf in encryption
-	for(int i = 0; i <HM_LEN; i++){
-		if(hBuf[i] != inBuf[len-HM_LEN+i]) {
+	for(int i = 0; i < HM_LEN; i++){
+		if(hBuf[i] != inBuf[len - HM_LEN + i]) {
 			return -1; 
 		}
 	}
@@ -192,10 +191,10 @@ size_t ske_decrypt(unsigned char* outBuf, unsigned char* inBuf, size_t len,
 	//initialize decryption using 
 	
 
-	if (1!=EVP_DecryptInit_ex(ctx,EVP_aes_256_ctr(),0,K->aesKey, iv)){
+	if (1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_ctr(), 0, K->aesKey, iv)){
 		ERR_print_errors_fp(stderr);
 	}
-	if (1!=EVP_DecryptUpdate(ctx,outBuf,&nWritten,inBuf+16,len-16-HM_LEN)) {
+	if (1 != EVP_DecryptUpdate(ctx, outBuf, &nWritten, inBuf + 16, len - 16 - HM_LEN)) {
 		ERR_print_errors_fp(stderr);
 	}
 
@@ -256,7 +255,7 @@ size_t ske_decrypt_file(const char* fnout, const char* fnin,
 		printf("Writing failed :(\n");
 	}
 
-	// Free everything
+	// Free and close everything
 	if (!munmap(mapping, statusBuff.st_size)) {
 		printf("Unmapping failed?\n");
 		return - 1;
