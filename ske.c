@@ -214,5 +214,60 @@ size_t ske_decrypt_file(const char* fnout, const char* fnin,
 		SKE_KEY* K, size_t offset_in)
 {
 	/* TODO: write this. */
-	return 0;
+
+	int fdIn = open(fnin, O_RDONLY);
+	int fdOut = open(fnout, O_CREAT | O_RDWR, S_IRWXU);
+	
+	if ((fdIn == -1 || fdOut == -1)) {
+		printf("Could not open files\n");
+		return -1;
+	}
+	
+	// Create status buffer to keep track of info about file
+	struct stat statusBuff;
+
+	if ((fstat(fdIn, &statusBuff) == -1) || (statusBuff.st_size == 0)) {
+		printf("Status of buffer is bad???\n");
+		return -1;
+	}
+
+	// Create virtual mapping of file and memory
+	// Recall that ske_encrypt_file() uses offset_out to write the ciphertext after
+	// a set offset, so start mapping from offset_in
+	unsigned char *mapping;
+	mapping = mmap(NULL, statusBuff.st_size, PROT_READ, MAP_PRIVATE, fdIn, offset_in);
+	
+	if (mapping == MAP_FAILED) {
+		printf("Mapping failed??\n");
+		return -1;
+	}
+
+	// Decrypt ciphertext in fnout to get ciphertext
+	// Hopefully the math is correct(?)
+	size_t mappingSize = statusBuff.st_size - offset_in;
+	size_t plaintextLength = mappingSize - 16 - HM_LEN;
+	unsigned char* plaintext = malloc(plaintextLength);
+	ssize_t decryptLength = ske_decrypt(plaintext, mapping, mappingSize, K);
+
+	// Write to file
+	ssize_t writtenBits = write(fdOut, plaintext, decryptLength);
+
+	if (writtenBits == -1) {
+		printf("Writing failed :(\n");
+	}
+
+	// Free everything
+	if (!munmap(mapping, statusBuff.st_size)) {
+		printf("Unmapping failed?\n");
+		return - 1;
+	}
+
+	free(plaintext);
+
+	if(!close(fdIn) || !close(fdOut)) {
+		printf("Could not close files :/\n");
+		return - 1;
+	}
+
+	return writtenBits;
 }
