@@ -1,7 +1,9 @@
 /* interface for CCA2 symmetric key encryption (SKE) */
 #pragma once
 
-#include </usr/local/Cellar/openssl/1.0.2t/include/openssl/aes.h>
+// Only uncomment below if running into issue on Mac
+// #include </usr/local/Cellar/openssl/1.0.2t/include/openssl/aes.h>
+#include <openssl/aes.h>
 #include <inttypes.h>
 #include <stdio.h>
 
