@@ -56,6 +56,50 @@ int rsa_keyGen(size_t keyBits, RSA_KEY* K)
 	 * the right length, and then test for primality (see the ISPRIME
 	 * macro above).  Once you've found the primes, set up the other
 	 * pieces of the key ({en,de}crypting exponents, and n=pq). */
+	gmp_randstate_t state;
+	gmp_randinit_default(state); 
+	unsigned char* buf = (unsigned char*)malloc(keyBits/2);
+	
+	//generate p
+	randBytes(buf, keyBits/2);
+	BYTES2Z(K->p, buf, keyBits/2);
+	while (!ISPRIME(K->p)) {
+		randBytes(buf, keyBits/2);
+		BYTES2Z(K->p, buf, keyBits/2);
+	}
+
+	//generate q
+	randBytes(buf, keyBits/2);
+	BYTES2Z(K->q, buf, keyBits/2);
+	while (!ISPRIME(K->q)) {
+		randBytes(buf, keyBits/2);
+		BYTES2Z(K->q, buf, keyBits/2);
+	}
+
+	//generate n
+	mpz_mul(K->n, K->q, K->p);
+	
+	NEWZ(gcd);
+	NEWZ(phi);
+	NEWZ(pphi);
+	NEWZ(qphi);
+
+	//Calculate Phi(n)
+	mpz_sub_ui(qphi, K->q, 1);
+	mpz_sub_ui(pphi, K->p, 1);
+	mpz_mul(phi, pphi, qphi);
+
+	//init e to phi
+	mpz_set(K->e, phi);
+	mpz_gcd(gcd, phi, K->e);
+	//find 1 < e < phi(p), co-prime to phi(p)
+	while (mpz_cmp_ui(gcd, 1) != 0  || mpz_cmp_ui(K->e, 1) == 0) {
+		mpz_urandomm(K->e, state, phi);
+		mpz_gcd(gcd, K->e, phi);
+	}
+	//find d as the modular inverse of e mod phi(n)
+	mpz_invert(K->d, K->e, phi);
+
 	return 0;
 }
 
@@ -64,13 +108,21 @@ size_t rsa_encrypt(unsigned char* outBuf, unsigned char* inBuf, size_t len,
 {
 	/* TODO: write this.  Use BYTES2Z to get integers, and then
 	 * Z2BYTES to write the output buffer. */
-	return 0; /* TODO: return should be # bytes written */
+	NEWZ(msg);
+	BYTES2Z(msg, inBuf, len);
+	mpz_powm(msg, msg, K->e, K->n);
+	Z2BYTES(outBuf, len, msg);
+	return len; /* TODO: return should be # bytes written */
 }
 size_t rsa_decrypt(unsigned char* outBuf, unsigned char* inBuf, size_t len,
 		RSA_KEY* K)
 {
 	/* TODO: write this.  See remarks above. */
-	return 0;
+	NEWZ(msg);
+	BYTES2Z(msg, inBuf, len);
+	mpz_powm(msg, msg, K->d, K->n);
+	Z2BYTES(outBuf, len, msg);
+	return len;
 }
 
 size_t rsa_numBytesN(RSA_KEY* K)
@@ -139,3 +191,4 @@ int rsa_shredKey(RSA_KEY* K)
 	 * of course larger than mpz_size(X)) */
 	return 0;
 }
+
