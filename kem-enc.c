@@ -6,9 +6,11 @@
 #include <stdlib.h>
 #include <getopt.h>
 #include <string.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <openssl/sha.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include "ske.h"
 #include "rsa.h"
 #include "prf.h"
@@ -105,7 +107,8 @@ int kem_decrypt(const char* fnOut, const char* fnIn, RSA_KEY* K)
 	size_t fileSize;
 	struct stat st;	
 	
-	fdIn = open(fnIn, &st);
+	fdIn = open(fnIn, O_RDONLY);
+	stat(fnIn, &st);
 	fileSize = st.st_size;
 	//Copy the file and put it in a buffer
 	mappedFile = mmap(NULL, fileSize, PROT_READ, MAP_PRIVATE, fdIn, 0);
@@ -225,7 +228,7 @@ int main(int argc, char *argv[]) {
 			rsa_shredKey(&K);
 			break;
 		case DEC:
-			rsa_privateKey = fdopen(fnKey, "r");
+			rsa_privateKey = fopen(fnKey, "r");
 			rsa_readPrivate(rsa_privateKey, &K);
 			kem_decrypt(fnOut, fnIn, &K);
 			fclose(rsa_privateKey);
